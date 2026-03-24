@@ -56,6 +56,24 @@ app.use('/api/certificates', require('./src/routes/certificates'));
 app.use('/api/admin', require('./src/routes/admin'));
 app.use('/api/notifications', require('./src/routes/notifications'));
 
+app.get('/api', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Course Registration API',
+    health: '/api/health',
+    routes: {
+      auth: '/api/auth',
+      users: '/api/users',
+      academicCourses: '/api/academic-courses',
+      universalCourses: '/api/universal-courses',
+      enrollments: '/api/enrollments',
+      certificates: '/api/certificates',
+      admin: '/api/admin',
+      notifications: '/api/notifications',
+    },
+  });
+});
+
 // Health Check
 app.get('/api/health', (req, res) => {
   const db = getDbStatus();
