@@ -16,6 +16,9 @@ const certificateSchema = new mongoose.Schema({
     required: true,
   },
   courseName: { type: String, required: true },
+  courseProvider: { type: String, required: true, trim: true },
+  skillsLearned: { type: String, required: true, trim: true },
+  durationHours: { type: Number, required: true, min: 0 },
   fileUrl: { type: String, required: true },
   fileName: { type: String },
   status: {

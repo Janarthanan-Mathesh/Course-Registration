@@ -14,6 +14,23 @@ const signToken = (id) =>
 const normalizePhone = (value) => String(value || '').replace(/[\s-]/g, '').replace(/^0+/, '');
 const normalizeOtpCode = (value) => String(value || '').replace(/\s/g, '');
 
+const verifyDeveloperOtpCode = (adminDevOtp) => {
+  if (!ADMIN_DEV_OTP) {
+    throw new Error('Developer OTP is not configured on server');
+  }
+
+  const providedAdminDevOtp = normalizeOtpCode(adminDevOtp);
+  if (!providedAdminDevOtp) {
+    throw new Error('Developer OTP is required');
+  }
+
+  if (providedAdminDevOtp !== normalizeOtpCode(ADMIN_DEV_OTP)) {
+    throw new Error('Invalid developer OTP');
+  }
+
+  return true;
+};
+
 const verifyAdminDeveloperAccess = async ({ firebaseIdToken, adminDevOtp }) => {
   const providedAdminDevOtp = normalizeOtpCode(adminDevOtp);
   if (ADMIN_DEV_OTP && providedAdminDevOtp && providedAdminDevOtp === normalizeOtpCode(ADMIN_DEV_OTP)) {
@@ -38,6 +55,33 @@ const verifyAdminDeveloperAccess = async ({ firebaseIdToken, adminDevOtp }) => {
   return true;
 };
 
+const buildRegisterSuccessPayload = async ({ user, otp, statusCode = 201, baseMessage }) => {
+  let message = baseMessage;
+  let otpDelivery = 'sent';
+  let otpPreview;
+
+  try {
+    await sendOtpEmail(user.email, otp);
+  } catch (emailError) {
+    otpDelivery = 'failed';
+    message = `${baseMessage} OTP email delivery failed; use OTP preview to continue.`;
+    if (process.env.NODE_ENV !== 'production') {
+      otpPreview = otp;
+    }
+  }
+
+  return {
+    statusCode,
+    body: {
+      success: true,
+      message,
+      userId: user._id,
+      otpDelivery,
+      ...(otpPreview ? { otpPreview } : {}),
+    },
+  };
+};
+
 // @desc  Register new user/admin
 // @route POST /api/auth/register
 const register = async (req, res) => {
@@ -50,26 +94,65 @@ const register = async (req, res) => {
       phone,
       linkedinLink,
       githubLink,
-      role = 'user',
+      role = 'student',
+      adminDevOtp,
     } = req.body;
 
     if (password !== confirmPassword) {
       return res.status(400).json({ success: false, message: 'Passwords do not match' });
     }
 
-    const normalizedRole = role === 'admin' ? 'admin' : 'user';
+    const allowedRoles = ['student', 'mentor', 'admin'];
+    const normalizedRole = allowedRoles.includes(role) ? role : 'student';
 
-    const existingUser = await User.findOne({ $or: [{ email: email.toLowerCase() }, { username }] });
-    if (existingUser) {
-      return res.status(400).json({ success: false, message: 'Email or username already exists' });
+    if (normalizedRole !== 'student') {
+      try {
+        verifyDeveloperOtpCode(adminDevOtp);
+      } catch (otpError) {
+        return res.status(401).json({ success: false, message: otpError.message });
+      }
+    }
+
+    const normalizedEmail = email.toLowerCase();
+    const existingUser = await User.findOne({ $or: [{ email: normalizedEmail }, { username }] });
+    if (existingUser && existingUser.isEmailVerified) {
+      return res.status(200).json({
+        success: true,
+        requiresLogin: true,
+        message: 'Account already exists. Please login with this email/username.',
+      });
     }
 
     const otp = generateOtp();
     const otpExpiry = getOtpExpiry();
 
-    const user = await User.create({
+    let user = existingUser;
+    if (user) {
+      user.username = username;
+      user.email = normalizedEmail;
+      user.password = password;
+      user.phone = phone;
+      user.linkedinLink = linkedinLink;
+      user.githubLink = githubLink;
+      user.role = normalizedRole;
+      user.authProvider = 'local';
+      user.emailOtp = otp;
+      user.emailOtpExpiry = otpExpiry;
+      user.isAdminDeveloperVerified = true;
+      await user.save();
+
+      const payload = await buildRegisterSuccessPayload({
+        user,
+        otp,
+        statusCode: 200,
+        baseMessage: 'Account exists but not verified. A new OTP has been generated.',
+      });
+      return res.status(payload.statusCode).json(payload.body);
+    }
+
+    user = await User.create({
       username,
-      email,
+      email: normalizedEmail,
       password,
       phone,
       linkedinLink,
@@ -81,13 +164,13 @@ const register = async (req, res) => {
       isAdminDeveloperVerified: true,
     });
 
-    await sendOtpEmail(email, otp);
-
-    res.status(201).json({
-      success: true,
-      message: 'Registration successful. Please verify your email with the OTP sent.',
-      userId: user._id,
+    const payload = await buildRegisterSuccessPayload({
+      user,
+      otp,
+      statusCode: 201,
+      baseMessage: 'Registration successful. Please verify your email with the OTP sent.',
     });
+    return res.status(payload.statusCode).json(payload.body);
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -148,6 +231,18 @@ const login = async (req, res) => {
 
     if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    if (user.role === 'user') {
+      user.role = 'student';
+    }
+
+    if (user.role === 'mentor') {
+      try {
+        verifyDeveloperOtpCode(adminDevOtp);
+      } catch (otpError) {
+        return res.status(401).json({ success: false, message: otpError.message });
+      }
     }
 
     if (!user.isEmailVerified) {

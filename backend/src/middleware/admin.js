@@ -5,4 +5,11 @@ const adminOnly = (req, res, next) => {
   return res.status(403).json({ success: false, message: 'Admin access required.' });
 };
 
-module.exports = { adminOnly };
+const verifierOnly = (req, res, next) => {
+  if (req.user && ['admin', 'mentor'].includes(req.user.role)) {
+    return next();
+  }
+  return res.status(403).json({ success: false, message: 'Verifier access required (admin or mentor).' });
+};
+
+module.exports = { adminOnly, verifierOnly };

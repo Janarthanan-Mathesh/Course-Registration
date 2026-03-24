@@ -3,6 +3,7 @@ const AcademicCourse = require('../models/AcademicCourse');
 const UniversalCourse = require('../models/UniversalCourse');
 const Enrollment = require('../models/Enrollment');
 const Certificate = require('../models/Certificate');
+const NON_ADMIN_ROLES = ['student', 'mentor'];
 
 // @desc  Get platform statistics
 // @route GET /api/admin/stats
@@ -16,7 +17,7 @@ const getStats = async (req, res) => {
       totalCertificates,
       pendingCertificates,
     ] = await Promise.all([
-      User.countDocuments({ role: 'user' }),
+      User.countDocuments({ role: { $in: NON_ADMIN_ROLES } }),
       AcademicCourse.countDocuments(),
       UniversalCourse.countDocuments(),
       Enrollment.countDocuments(),
@@ -59,7 +60,7 @@ const getStats = async (req, res) => {
 const getAllUsers = async (req, res) => {
   try {
     const { page = 1, limit = 20, search } = req.query;
-    const filter = { role: 'user' };
+    const filter = { role: { $in: NON_ADMIN_ROLES } };
     if (search) {
       filter.$or = [
         { username: { $regex: search, $options: 'i' } },
@@ -125,7 +126,7 @@ const getUserDetail = async (req, res) => {
 const broadcastNotification = async (req, res) => {
   try {
     const { title, message } = req.body;
-    const users = await User.find({ role: 'user' }).select('_id');
+    const users = await User.find({ role: { $in: NON_ADMIN_ROLES } }).select('_id');
     const Notification = require('../models/Notification');
 
     const notifications = users.map((u) => ({

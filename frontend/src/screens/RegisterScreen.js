@@ -3,16 +3,18 @@ import {
   View,
   Text,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   ScrollView,
   Alert,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
+import AppInput from '../components/AppInput';
+import AppButton from '../components/AppButton';
+import typography from '../utils/typography';
+import ds from '../utils/designSystem';
 
 const RegisterScreen = ({ navigation }) => {
   const [formData, setFormData] = useState({
@@ -23,13 +25,16 @@ const RegisterScreen = ({ navigation }) => {
     phone: '',
     linkedin: '',
     github: '',
-    role: 'user',
+    role: 'student',
+    adminDevOtp: '',
   });
   const [otp, setOtp] = useState('');
   const [registeredUserId, setRegisteredUserId] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [statusText, setStatusText] = useState('');
+  const [statusType, setStatusType] = useState('info');
   const { register, verifyEmailOtp, applySession } = useAuth();
 
   const handleInputChange = (field, value) => {
@@ -37,10 +42,18 @@ const RegisterScreen = ({ navigation }) => {
   };
 
   const handleRegister = async () => {
-    const { username, email, password, confirmPassword, phone } = formData;
+    setStatusText('');
+    setStatusType('info');
+    const { username, email, password, confirmPassword, phone, adminDevOtp } = formData;
 
-    if (!username || !email || !password || !confirmPassword || !phone) {
-      Alert.alert('Error', 'Please fill in all mandatory fields');
+    const needsDeveloperOtp = formData.role !== 'student';
+    if (!username || !email || !password || !confirmPassword || !phone || (needsDeveloperOtp && !adminDevOtp.trim())) {
+      Alert.alert(
+        'Error',
+        needsDeveloperOtp
+          ? 'Please fill in all mandatory fields including developer OTP'
+          : 'Please fill in all mandatory fields'
+      );
       return;
     }
 
@@ -57,16 +70,35 @@ const RegisterScreen = ({ navigation }) => {
     setIsSubmitting(true);
     try {
       const data = await register(formData);
+      if (data?.requiresLogin) {
+        setStatusType('error');
+        setStatusText(data.message || 'Account already exists. Please login.');
+        return;
+      }
       setRegisteredUserId(data.userId);
-      Alert.alert('OTP Sent', 'Check your email for OTP, then verify to complete registration.');
+      const otpPreviewMessage = data.otpPreview ? `\nOTP (dev): ${data.otpPreview}` : '';
+      const infoMessage =
+        data.message || 'Check your email for OTP, then verify to complete registration.';
+      setStatusText(infoMessage);
+      setStatusType('success');
+      Alert.alert('Registration Successful', `${infoMessage}${otpPreviewMessage}`);
     } catch (error) {
-      Alert.alert('Registration Failed', error.message);
+      const message = error?.message || 'Registration failed';
+      if (error?.status === 400 && /already exists/i.test(message)) {
+        setStatusText(`${message}. Please login with this account.`);
+      } else {
+        setStatusText(message);
+      }
+      setStatusType('error');
+      Alert.alert('Registration Failed', message);
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleVerifyOtp = async () => {
+    setStatusText('');
+    setStatusType('info');
     if (!registeredUserId || !otp) {
       Alert.alert('Error', 'Enter OTP to continue');
       return;
@@ -81,21 +113,32 @@ const RegisterScreen = ({ navigation }) => {
         email: formData.email,
         role: formData.role,
       });
+      setStatusText('Registration and verification completed.');
+      setStatusType('success');
       Alert.alert('Success', 'Registration and verification completed.');
       navigation.replace('Main');
     } catch (error) {
+      setStatusText(error.message);
+      setStatusType('error');
       Alert.alert('Verification Failed', error.message);
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const Container = Platform.OS === 'web' ? View : KeyboardAvoidingView;
+  const containerProps =
+    Platform.OS === 'web'
+      ? { style: styles.container }
+      : { behavior: Platform.OS === 'ios' ? 'padding' : 'height', style: styles.container };
+
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+    <Container {...containerProps}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="always"
+      >
         <View style={styles.headerContainer}>
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
             <Ionicons name="arrow-back" size={24} color="#2C3E50" />
@@ -106,121 +149,43 @@ const RegisterScreen = ({ navigation }) => {
 
         <View style={styles.formContainer}>
           <View style={styles.roleSwitch}>
-            <TouchableOpacity
-              style={[styles.roleButton, formData.role === 'user' && styles.roleButtonActive]}
-              onPress={() => handleInputChange('role', 'user')}
-            >
-              <Text style={[styles.roleButtonText, formData.role === 'user' && styles.roleButtonTextActive]}>
-                User Register
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.roleButton, formData.role === 'admin' && styles.roleButtonActive]}
-              onPress={() => handleInputChange('role', 'admin')}
-            >
-              <Text style={[styles.roleButtonText, formData.role === 'admin' && styles.roleButtonTextActive]}>
-                Admin Register
-              </Text>
-            </TouchableOpacity>
+            {['student', 'mentor', 'admin'].map((role) => (
+              <TouchableOpacity
+                key={role}
+                style={[styles.roleButton, formData.role === role && styles.roleButtonActive]}
+                onPress={() => handleInputChange('role', role)}
+              >
+                <Text style={[styles.roleButtonText, formData.role === role && styles.roleButtonTextActive]}>
+                  {role.charAt(0).toUpperCase() + role.slice(1)}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
 
-          <View style={styles.inputContainer}>
-            <Ionicons name="person-outline" size={20} color="#666" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Username *"
-              value={formData.username}
-              onChangeText={(value) => handleInputChange('username', value)}
-              autoCapitalize="none"
+          <AppInput leftIcon="person-outline" placeholder="Username *" value={formData.username} onChangeText={(value) => handleInputChange('username', value)} autoCapitalize="none" />
+          <AppInput leftIcon="mail-outline" placeholder="Email *" value={formData.email} onChangeText={(value) => handleInputChange('email', value)} autoCapitalize="none" keyboardType="email-address" />
+          <AppInput leftIcon="call-outline" placeholder="Phone Number *" value={formData.phone} onChangeText={(value) => handleInputChange('phone', value)} keyboardType="phone-pad" />
+          <AppInput leftIcon="lock-closed-outline" placeholder="Password *" value={formData.password} onChangeText={(value) => handleInputChange('password', value)} secureTextEntry={!showPassword} showToggle isPasswordVisible={showPassword} onTogglePassword={() => setShowPassword(!showPassword)} />
+          <AppInput leftIcon="lock-closed-outline" placeholder="Confirm Password *" value={formData.confirmPassword} onChangeText={(value) => handleInputChange('confirmPassword', value)} secureTextEntry={!showConfirmPassword} showToggle isPasswordVisible={showConfirmPassword} onTogglePassword={() => setShowConfirmPassword(!showConfirmPassword)} />
+          <AppInput leftIcon="logo-linkedin" placeholder="LinkedIn Profile (Optional)" value={formData.linkedin} onChangeText={(value) => handleInputChange('linkedin', value)} autoCapitalize="none" />
+          <AppInput leftIcon="logo-github" placeholder="GitHub Profile (Optional)" value={formData.github} onChangeText={(value) => handleInputChange('github', value)} autoCapitalize="none" />
+          {formData.role !== 'student' && (
+            <AppInput
+              leftIcon="shield-checkmark-outline"
+              placeholder="Developer OTP *"
+              value={formData.adminDevOtp}
+              onChangeText={(value) => handleInputChange('adminDevOtp', value)}
+              secureTextEntry
             />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Ionicons name="mail-outline" size={20} color="#666" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Email *"
-              value={formData.email}
-              onChangeText={(value) => handleInputChange('email', value)}
-              autoCapitalize="none"
-              keyboardType="email-address"
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Ionicons name="call-outline" size={20} color="#666" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Phone Number *"
-              value={formData.phone}
-              onChangeText={(value) => handleInputChange('phone', value)}
-              keyboardType="phone-pad"
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Password *"
-              value={formData.password}
-              onChangeText={(value) => handleInputChange('password', value)}
-              secureTextEntry={!showPassword}
-            />
-            <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-              <Ionicons name={showPassword ? 'eye-outline' : 'eye-off-outline'} size={20} color="#666" />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Confirm Password *"
-              value={formData.confirmPassword}
-              onChangeText={(value) => handleInputChange('confirmPassword', value)}
-              secureTextEntry={!showConfirmPassword}
-            />
-            <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
-              <Ionicons
-                name={showConfirmPassword ? 'eye-outline' : 'eye-off-outline'}
-                size={20}
-                color="#666"
-              />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Ionicons name="logo-linkedin" size={20} color="#666" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="LinkedIn Profile (Optional)"
-              value={formData.linkedin}
-              onChangeText={(value) => handleInputChange('linkedin', value)}
-              autoCapitalize="none"
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Ionicons name="logo-github" size={20} color="#666" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="GitHub Profile (Optional)"
-              value={formData.github}
-              onChangeText={(value) => handleInputChange('github', value)}
-              autoCapitalize="none"
-            />
-          </View>
+          )}
 
           {!registeredUserId ? (
-            <TouchableOpacity style={styles.registerButton} onPress={handleRegister} disabled={isSubmitting}>
-              {isSubmitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.registerButtonText}>REGISTER</Text>}
-            </TouchableOpacity>
+            <AppButton label="REGISTER" onPress={handleRegister} loading={isSubmitting} style={styles.registerButton} />
           ) : (
             <>
               <View style={styles.otpBox}>
                 <Text style={styles.otpTitle}>Verify Email OTP</Text>
-                <TextInput
+                <AppInput
                   style={styles.otpInput}
                   placeholder="Enter OTP"
                   value={otp}
@@ -228,10 +193,33 @@ const RegisterScreen = ({ navigation }) => {
                   keyboardType="number-pad"
                 />
               </View>
-              <TouchableOpacity style={styles.registerButton} onPress={handleVerifyOtp} disabled={isSubmitting}>
-                {isSubmitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.registerButtonText}>VERIFY OTP</Text>}
-              </TouchableOpacity>
+              <AppButton label="VERIFY OTP" onPress={handleVerifyOtp} loading={isSubmitting} style={styles.registerButton} />
             </>
+          )}
+
+          {!!statusText && (
+            <View
+              style={[
+                styles.statusBox,
+                statusType === 'error' && styles.statusBoxError,
+                statusType === 'success' && styles.statusBoxSuccess,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.statusText,
+                  statusType === 'error' && styles.statusTextError,
+                  statusType === 'success' && styles.statusTextSuccess,
+                ]}
+              >
+                {statusText}
+              </Text>
+              {statusType === 'error' && /already exists/i.test(statusText) && (
+                <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+                  <Text style={styles.statusAction}>Go to Login</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           )}
 
           <View style={styles.loginContainer}>
@@ -242,18 +230,21 @@ const RegisterScreen = ({ navigation }) => {
           </View>
         </View>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </Container>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F7FA',
+    backgroundColor: ds.colors.background,
   },
   scrollContent: {
     flexGrow: 1,
     padding: 20,
+  },
+  scrollView: {
+    flex: 1,
   },
   headerContainer: {
     marginTop: 40,
@@ -263,29 +254,26 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
+    ...typography.display,
     color: '#2C3E50',
   },
   subtitle: {
-    fontSize: 16,
-    color: '#7F8C8D',
+    ...typography.title,
+    color: ds.colors.textSecondary,
     marginTop: 8,
   },
   formContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 15,
+    backgroundColor: ds.colors.surface,
+    borderRadius: ds.radius.lg,
     padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+    borderWidth: 1,
+    borderColor: ds.colors.border,
+    ...ds.shadows.card,
   },
   roleSwitch: {
     flexDirection: 'row',
-    backgroundColor: '#EEF3F9',
-    borderRadius: 10,
+    backgroundColor: '#EEF2FF',
+    borderRadius: ds.radius.md,
     padding: 4,
     marginBottom: 16,
   },
@@ -296,64 +284,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   roleButtonActive: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: ds.colors.primaryIndigo,
   },
   roleButtonText: {
-    color: '#53708A',
-    fontWeight: '600',
-    fontSize: 13,
+    ...typography.label,
+    color: ds.colors.textSecondary,
   },
   roleButtonTextActive: {
     color: '#FFFFFF',
   },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F5F7FA',
-    borderRadius: 10,
-    paddingHorizontal: 15,
-    marginBottom: 15,
-    height: 50,
-  },
-  inputIcon: {
-    marginRight: 10,
-  },
-  input: {
-    flex: 1,
-    fontSize: 16,
-    color: '#2C3E50',
-  },
   registerButton: {
-    backgroundColor: '#4A90E2',
-    borderRadius: 10,
-    height: 50,
-    justifyContent: 'center',
-    alignItems: 'center',
     marginTop: 10,
     marginBottom: 20,
   },
-  registerButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
   otpBox: {
-    backgroundColor: '#EEF5FF',
-    borderRadius: 10,
+    backgroundColor: '#EFF6FF',
+    borderRadius: ds.radius.md,
     padding: 12,
     marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
   },
   otpTitle: {
-    fontSize: 14,
-    color: '#2C3E50',
-    fontWeight: '600',
+    ...typography.title,
+    color: ds.colors.textPrimary,
     marginBottom: 8,
   },
   otpInput: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    height: 45,
+    marginBottom: 0,
   },
   loginContainer: {
     flexDirection: 'row',
@@ -361,13 +319,47 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   loginText: {
-    color: '#7F8C8D',
-    fontSize: 14,
+    color: ds.colors.textSecondary,
+    ...typography.bodySm,
   },
   loginLink: {
-    color: '#4A90E2',
-    fontSize: 14,
-    fontWeight: 'bold',
+    color: ds.colors.primaryBlue,
+    ...typography.bodySm,
+    fontWeight: '700',
+  },
+  statusBox: {
+    borderRadius: ds.radius.md,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginTop: 2,
+    marginBottom: 8,
+    backgroundColor: ds.colors.infoSoft,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  statusBoxError: {
+    backgroundColor: ds.colors.dangerSoft,
+    borderColor: '#FECACA',
+  },
+  statusBoxSuccess: {
+    backgroundColor: ds.colors.successSoft,
+    borderColor: '#BBF7D0',
+  },
+  statusText: {
+    color: ds.colors.textPrimary,
+    ...typography.bodySm,
+  },
+  statusTextError: {
+    color: '#991B1B',
+  },
+  statusTextSuccess: {
+    color: '#166534',
+  },
+  statusAction: {
+    marginTop: 6,
+    color: ds.colors.primaryBlue,
+    ...typography.label,
+    fontWeight: '700',
   },
 });
 

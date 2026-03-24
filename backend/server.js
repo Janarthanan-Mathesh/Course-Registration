@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const { connectDB, getDbStatus } = require('./src/config/db');
 
 dotenv.config();
 
@@ -14,7 +15,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static('uploads'));
 
 // Database Connection
-require('./src/config/db');
+connectDB();
 
 // Routes
 app.use('/api/auth', require('./src/routes/auth'));
@@ -28,7 +29,12 @@ app.use('/api/notifications', require('./src/routes/notifications'));
 
 // Health Check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Course Registration API is running' });
+  const db = getDbStatus();
+  res.json({
+    status: db.connected ? 'OK' : 'DEGRADED',
+    message: 'Course Registration API is running',
+    db,
+  });
 });
 
 // Error Handler

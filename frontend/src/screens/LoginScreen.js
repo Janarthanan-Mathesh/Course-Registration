@@ -1,108 +1,72 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   ScrollView,
   Alert,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
-import { PhoneAuthProvider, signInWithCredential } from 'firebase/auth';
 import { useAuth } from '../context/AuthContext';
-import { firebaseApp, firebaseAuth, DEVELOPER_VERIFY_PHONE } from '../services/firebase';
+import AppButton from '../components/AppButton';
+import AppInput from '../components/AppInput';
+import typography from '../utils/typography';
+import ds from '../utils/designSystem';
 
-const LoginScreen = ({ navigation }) => {
-  const recaptchaVerifier = useRef(null);
-
+const LoginScreen = ({ navigation, route }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [loginRole, setLoginRole] = useState('user');
-  const [verificationId, setVerificationId] = useState('');
-  const [adminOtpCode, setAdminOtpCode] = useState('');
-  const [firebaseIdToken, setFirebaseIdToken] = useState('');
+  const [loginRole, setLoginRole] = useState('student');
   const [adminDevOtp, setAdminDevOtp] = useState('');
-  const [isSendingOtp, setIsSendingOtp] = useState(false);
-  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+  const [statusText, setStatusText] = useState('');
+  const [statusType, setStatusType] = useState('info');
 
   const { login, isAuthLoading } = useAuth();
 
-  const resetAdminOtpFlow = () => {
-    setVerificationId('');
-    setAdminOtpCode('');
-    setFirebaseIdToken('');
-    setAdminDevOtp('');
-  };
+  useEffect(() => {
+    const incomingMessage = route?.params?.statusMessage;
+    const incomingType = route?.params?.statusType;
+    if (!incomingMessage) return;
+    setStatusText(incomingMessage);
+    setStatusType(incomingType || 'info');
+    navigation.setParams({ statusMessage: undefined, statusType: undefined });
+  }, [route?.params?.statusMessage, route?.params?.statusType, navigation]);
 
-  const handleRoleChange = (role) => {
-    setLoginRole(role);
-    if (role !== 'admin') {
-      resetAdminOtpFlow();
-    }
-  };
-
-  const handleSendAdminOtp = async () => {
-    try {
-      setIsSendingOtp(true);
-      const provider = new PhoneAuthProvider(firebaseAuth);
-      const id = await provider.verifyPhoneNumber(DEVELOPER_VERIFY_PHONE, recaptchaVerifier.current);
-      setVerificationId(id);
-      Alert.alert('OTP Sent', `Developer OTP sent to ${DEVELOPER_VERIFY_PHONE}`);
-    } catch (error) {
-      Alert.alert('OTP Send Failed', error.message);
-    } finally {
-      setIsSendingOtp(false);
-    }
-  };
-
-  const handleVerifyAdminOtp = async () => {
-    if (!verificationId || !adminOtpCode) {
-      Alert.alert('Error', 'Enter the OTP first');
-      return;
-    }
-
-    try {
-      setIsVerifyingOtp(true);
-      const credential = PhoneAuthProvider.credential(verificationId, adminOtpCode);
-      const userCredential = await signInWithCredential(firebaseAuth, credential);
-      const idToken = await userCredential.user.getIdToken(true);
-      setFirebaseIdToken(idToken);
-      Alert.alert('Verified', 'Developer phone verification successful');
-    } catch (error) {
-      Alert.alert('OTP Verification Failed', error.message);
-    } finally {
-      setIsVerifyingOtp(false);
-    }
-  };
+  const handleRoleChange = (role) => setLoginRole(role);
 
   const handleLogin = async () => {
+    setStatusText('');
+    setStatusType('info');
     if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+      const message = 'Please fill in all fields';
+      setStatusText(message);
+      setStatusType('warning');
+      Alert.alert('Error', message);
       return;
     }
 
-    if (loginRole === 'admin' && !firebaseIdToken && !adminDevOtp.trim()) {
-      Alert.alert('Admin Verification Required', 'Verify phone OTP or enter your developer code.');
+    if (loginRole !== 'student' && !adminDevOtp.trim()) {
+      const message = 'Enter your developer OTP to continue.';
+      setStatusText(message);
+      setStatusType('warning');
+      Alert.alert('Developer OTP Required', message);
       return;
     }
 
     try {
-      await login(
-        email,
-        password,
-        loginRole,
-        loginRole === 'admin' ? firebaseIdToken : '',
-        loginRole === 'admin' ? adminDevOtp.trim() : ''
-      );
-      navigation.replace('Main');
+      await login(email, password, loginRole, '', adminDevOtp.trim());
+      Alert.alert('Success', 'Logged in successfully', [
+        { text: 'OK', onPress: () => navigation.replace('Main') },
+      ]);
     } catch (error) {
-      Alert.alert('Login Failed', error.message);
+      const message = error?.message || 'Login failed';
+      setStatusText(message);
+      setStatusType('error');
+      Alert.alert('Login Failed', message);
     }
   };
 
@@ -110,14 +74,19 @@ const LoginScreen = ({ navigation }) => {
     Alert.alert('Google Sign-In', 'Google Sign-In integration is not configured in this build.');
   };
 
-  return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
-    >
-      <FirebaseRecaptchaVerifierModal ref={recaptchaVerifier} firebaseConfig={firebaseApp.options} />
+  const Container = Platform.OS === 'web' ? View : KeyboardAvoidingView;
+  const containerProps =
+    Platform.OS === 'web'
+      ? { style: styles.container }
+      : { behavior: Platform.OS === 'ios' ? 'padding' : 'height', style: styles.container };
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+  return (
+    <Container {...containerProps}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.headerContainer}>
           <Ionicons name="school-outline" size={80} color="#4A90E2" />
           <Text style={styles.title}>Course Registration</Text>
@@ -126,109 +95,77 @@ const LoginScreen = ({ navigation }) => {
 
         <View style={styles.formContainer}>
           <View style={styles.roleSwitch}>
-            <TouchableOpacity
-              style={[styles.roleButton, loginRole === 'user' && styles.roleButtonActive]}
-              onPress={() => handleRoleChange('user')}
-            >
-              <Text style={[styles.roleButtonText, loginRole === 'user' && styles.roleButtonTextActive]}>
-                User Login
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.roleButton, loginRole === 'admin' && styles.roleButtonActive]}
-              onPress={() => handleRoleChange('admin')}
-            >
-              <Text style={[styles.roleButtonText, loginRole === 'admin' && styles.roleButtonTextActive]}>
-                Admin Login
-              </Text>
-            </TouchableOpacity>
+            {['student', 'mentor', 'admin'].map((role) => (
+              <TouchableOpacity
+                key={role}
+                style={[styles.roleButton, loginRole === role && styles.roleButtonActive]}
+                onPress={() => handleRoleChange(role)}
+              >
+                <Text style={[styles.roleButtonText, loginRole === role && styles.roleButtonTextActive]}>
+                  {role.charAt(0).toUpperCase() + role.slice(1)}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
 
-          {loginRole === 'admin' && (
+          {loginRole !== 'student' && (
             <View style={styles.otpCard}>
               <Text style={styles.otpTitle}>Developer Verification</Text>
-              <Text style={styles.otpHint}>Phone: {DEVELOPER_VERIFY_PHONE}</Text>
-
-              <TouchableOpacity style={styles.otpButton} onPress={handleSendAdminOtp} disabled={isSendingOtp}>
-                {isSendingOtp ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.otpButtonText}>Send OTP</Text>}
-              </TouchableOpacity>
-
-              <View style={styles.inputContainer}>
-                <Ionicons name="key-outline" size={20} color="#666" style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter OTP"
-                  value={adminOtpCode}
-                  onChangeText={setAdminOtpCode}
-                  keyboardType="number-pad"
-                />
-              </View>
-
-              <TouchableOpacity
-                style={[styles.otpButton, styles.verifyOtpButton]}
-                onPress={handleVerifyAdminOtp}
-                disabled={isVerifyingOtp}
-              >
-                {isVerifyingOtp ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.otpButtonText}>Verify OTP</Text>
-                )}
-              </TouchableOpacity>
-
-              <Text style={styles.altVerifyText}>Or use developer code (fallback)</Text>
-              <View style={styles.inputContainer}>
-                <Ionicons name="shield-checkmark-outline" size={20} color="#666" style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter developer code"
-                  value={adminDevOtp}
-                  onChangeText={setAdminDevOtp}
-                  secureTextEntry
-                />
-              </View>
-
-              {Boolean(firebaseIdToken) && <Text style={styles.verifiedText}>Developer OTP verified</Text>}
+              <Text style={styles.otpHint}>Developer OTP is required for mentor/admin.</Text>
+              <AppInput
+                leftIcon="shield-checkmark-outline"
+                placeholder="Enter developer OTP"
+                value={adminDevOtp}
+                onChangeText={setAdminDevOtp}
+                secureTextEntry
+              />
             </View>
           )}
 
-          <View style={styles.inputContainer}>
-            <Ionicons name="mail-outline" size={20} color="#666" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Email or Username"
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-            />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Password"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry={!showPassword}
-            />
-            <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-              <Ionicons
-                name={showPassword ? 'eye-outline' : 'eye-off-outline'}
-                size={20}
-                color="#666"
-              />
-            </TouchableOpacity>
-          </View>
+          <AppInput
+            leftIcon="mail-outline"
+            placeholder="Email or Username"
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+          />
+          <AppInput
+            leftIcon="lock-closed-outline"
+            placeholder="Password"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry={!showPassword}
+            showToggle
+            isPasswordVisible={showPassword}
+            onTogglePassword={() => setShowPassword(!showPassword)}
+          />
 
           <TouchableOpacity style={styles.forgotPassword}>
             <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.loginButton} onPress={handleLogin} disabled={isAuthLoading}>
-            {isAuthLoading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.loginButtonText}>LOGIN</Text>}
-          </TouchableOpacity>
+          <AppButton label="LOGIN" onPress={handleLogin} loading={isAuthLoading} style={styles.loginButton} />
+          {!!statusText && (
+            <View
+              style={[
+                styles.statusBox,
+                statusType === 'success' && styles.statusBoxSuccess,
+                statusType === 'error' && styles.statusBoxError,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.statusText,
+                  statusType === 'success' && styles.statusTextSuccess,
+                  statusType === 'error' && styles.statusTextError,
+                  statusType === 'warning' && styles.statusTextWarning,
+                ]}
+              >
+                {statusText}
+              </Text>
+            </View>
+          )}
 
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
@@ -249,49 +186,49 @@ const LoginScreen = ({ navigation }) => {
           </View>
         </View>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </Container>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F7FA',
+    backgroundColor: ds.colors.background,
   },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
     padding: 20,
   },
+  scrollView: {
+    flex: 1,
+  },
   headerContainer: {
     alignItems: 'center',
     marginBottom: 40,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
+    ...typography.display,
     color: '#2C3E50',
     marginTop: 20,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#7F8C8D',
+    ...typography.title,
+    color: ds.colors.textSecondary,
     marginTop: 8,
   },
   formContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 15,
+    backgroundColor: ds.colors.surface,
+    borderRadius: ds.radius.lg,
     padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+    borderWidth: 1,
+    borderColor: ds.colors.border,
+    ...ds.shadows.card,
   },
   roleSwitch: {
     flexDirection: 'row',
-    backgroundColor: '#EEF3F9',
-    borderRadius: 10,
+    backgroundColor: '#EEF2FF',
+    borderRadius: ds.radius.md,
     padding: 4,
     marginBottom: 16,
   },
@@ -302,97 +239,79 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   roleButtonActive: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: ds.colors.primaryIndigo,
   },
   roleButtonText: {
-    color: '#53708A',
-    fontWeight: '600',
-    fontSize: 13,
+    ...typography.label,
+    color: ds.colors.textSecondary,
   },
   roleButtonTextActive: {
     color: '#FFFFFF',
   },
   otpCard: {
-    backgroundColor: '#EFF7FF',
-    borderRadius: 10,
+    backgroundColor: '#F3E8FF',
+    borderRadius: ds.radius.md,
     padding: 12,
     marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
   },
   otpTitle: {
-    fontSize: 14,
-    fontWeight: '700',
+    ...typography.title,
     color: '#2C3E50',
   },
   otpHint: {
-    fontSize: 12,
-    color: '#5A748B',
+    ...typography.bodySm,
+    color: ds.colors.textSecondary,
     marginTop: 4,
     marginBottom: 10,
-  },
-  otpButton: {
-    backgroundColor: '#4A90E2',
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  verifyOtpButton: {
-    backgroundColor: '#2EA86B',
-  },
-  otpButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  verifiedText: {
-    color: '#2EA86B',
-    fontWeight: '700',
-    marginTop: 6,
-    textAlign: 'center',
-  },
-  altVerifyText: {
-    textAlign: 'center',
-    color: '#5A748B',
-    fontSize: 12,
-    marginBottom: 8,
-    marginTop: 4,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F5F7FA',
-    borderRadius: 10,
-    paddingHorizontal: 15,
-    marginBottom: 15,
-    height: 50,
-  },
-  inputIcon: {
-    marginRight: 10,
-  },
-  input: {
-    flex: 1,
-    fontSize: 16,
-    color: '#2C3E50',
   },
   forgotPassword: {
     alignSelf: 'flex-end',
     marginBottom: 20,
   },
   forgotPasswordText: {
-    color: '#4A90E2',
-    fontSize: 14,
+    color: ds.colors.primaryBlue,
+    ...typography.bodySm,
+    textDecorationLine: 'underline',
   },
   loginButton: {
-    backgroundColor: '#4A90E2',
-    borderRadius: 10,
+    backgroundColor: ds.colors.primaryIndigo,
+    borderRadius: ds.radius.md,
     height: 50,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
   },
-  loginButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
+  statusBox: {
+    borderRadius: ds.radius.md,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 10,
+    backgroundColor: ds.colors.warningSoft,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  statusBoxSuccess: {
+    backgroundColor: ds.colors.successSoft,
+    borderColor: '#86EFAC',
+  },
+  statusBoxError: {
+    backgroundColor: ds.colors.dangerSoft,
+    borderColor: '#FCA5A5',
+  },
+  statusText: {
+    color: ds.colors.textPrimary,
+    ...typography.bodySm,
+  },
+  statusTextSuccess: {
+    color: '#166534',
+  },
+  statusTextError: {
+    color: '#991B1B',
+  },
+  statusTextWarning: {
+    color: '#92400E',
   },
   divider: {
     flexDirection: 'row',
@@ -402,19 +321,19 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#E0E0E0',
+    backgroundColor: ds.colors.border,
   },
   dividerText: {
     marginHorizontal: 10,
     color: '#7F8C8D',
-    fontSize: 14,
+    ...typography.bodySm,
   },
   googleButton: {
     flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: ds.colors.surface,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 10,
+    borderColor: ds.colors.border,
+    borderRadius: ds.radius.md,
     height: 50,
     justifyContent: 'center',
     alignItems: 'center',
@@ -422,9 +341,8 @@ const styles = StyleSheet.create({
   },
   googleButtonText: {
     marginLeft: 10,
-    color: '#2C3E50',
-    fontSize: 16,
-    fontWeight: '600',
+    color: ds.colors.textPrimary,
+    ...typography.title,
   },
   registerContainer: {
     flexDirection: 'row',
@@ -432,13 +350,13 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   registerText: {
-    color: '#7F8C8D',
-    fontSize: 14,
+    color: ds.colors.textSecondary,
+    ...typography.bodySm,
   },
   registerLink: {
-    color: '#4A90E2',
-    fontSize: 14,
-    fontWeight: 'bold',
+    color: ds.colors.primaryBlue,
+    ...typography.bodySm,
+    fontWeight: '700',
   },
 });
 

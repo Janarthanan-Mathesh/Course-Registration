@@ -3,7 +3,7 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
   Alert,
   RefreshControl,
@@ -14,6 +14,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { apiGet, apiPost } from '../services/api';
+import ds from '../utils/designSystem';
+import typography from '../utils/typography';
 
 const SEMESTERS = ['All', '1', '2', '3', '4', '5', '6', '7', '8'];
 const DEPARTMENTS = [
@@ -50,13 +52,15 @@ const Selector = ({ label, value, options, visible, onOpen, onClose, onSelect })
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
         <View style={styles.modalCard}>
-          <ScrollView>
-            {options.map((opt) => (
-              <TouchableOpacity key={opt} style={styles.optionRow} onPress={() => onSelect(opt)}>
-                <Text style={styles.optionText}>{opt}</Text>
+          <FlatList
+            data={options}
+            keyExtractor={(item) => item}
+            renderItem={({ item }) => (
+              <TouchableOpacity style={styles.optionRow} onPress={() => onSelect(item)}>
+                <Text style={styles.optionText}>{item}</Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
+            )}
+          />
         </View>
       </TouchableOpacity>
     </Modal>
@@ -126,6 +130,63 @@ const AcademicCoursesScreen = () => {
     await Linking.openURL(url);
   };
 
+  const renderCourse = ({ item: course }) => {
+    const isRegistered = Boolean(course.isEnrolled);
+    return (
+      <View style={styles.courseCard}>
+        <Text style={styles.courseCode}>{course.courseCode}</Text>
+        <Text style={styles.courseName}>{course.courseName}</Text>
+        <Text style={styles.meta}>Sem {course.semester} | {course.department || '-'}</Text>
+        <Text style={styles.meta}>Faculty: {course.faculty || '-'}</Text>
+
+        <View style={styles.rowBtns}>
+          <TouchableOpacity
+            style={[styles.registerButton, isRegistered && styles.registeredButton]}
+            onPress={() => handleRegister(course._id)}
+            disabled={isRegistered}
+          >
+            <Text style={[styles.registerText, isRegistered && styles.registeredText]}>
+              {isRegistered ? 'Registered' : 'Register'}
+            </Text>
+          </TouchableOpacity>
+          {!!course.discourseLink && (
+            <TouchableOpacity
+              style={[styles.discourseButton, !hasGoogleCollegeLogin && styles.disabled]}
+              onPress={() => openLink(course.discourseLink)}
+              disabled={!hasGoogleCollegeLogin}
+            >
+              <Text style={styles.discourseText}>Discourse</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {(course.chapters || []).map((chapter) => (
+          <View key={chapter._id} style={styles.chapterCard}>
+            <Text style={styles.chapterName}>Chapter {chapter.chapterNo}: {chapter.chapterName}</Text>
+            {!!chapter.description && <Text style={styles.chapterDesc}>{chapter.description}</Text>}
+
+            {(chapter.pdfs || []).map((pdf, idx) => (
+              <View key={`${chapter._id}-pdf-${idx}`} style={styles.pdfRow}>
+                <Text style={styles.pdfTitle}>{pdf.title}</Text>
+                <TouchableOpacity style={styles.downloadBtn} onPress={() => openLink(pdf.url)}>
+                  <Ionicons name="download-outline" size={14} color="#FFFFFF" />
+                  <Text style={styles.downloadText}>Download</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+
+            {(chapter.externalLinks || []).map((lnk, idx) => (
+              <TouchableOpacity key={`${chapter._id}-ext-${idx}`} style={styles.itemLink} onPress={() => openLink(lnk.url)}>
+                <Ionicons name="link-outline" size={14} color="#1E6FD9" />
+                <Text style={styles.itemLinkText}>{lnk.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ))}
+      </View>
+    );
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.infoBanner}>
@@ -160,122 +221,83 @@ const AcademicCoursesScreen = () => {
         />
       </View>
 
-      <ScrollView
+      <FlatList
         style={styles.list}
+        contentContainerStyle={{ paddingBottom: 90 }}
+        data={filteredCourses}
+        keyExtractor={(item) => item._id}
+        renderItem={renderCourse}
+        keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadCourses} />}
-      >
-        {filteredCourses.map((course) => {
-          const isRegistered = Boolean(course.isEnrolled);
-          return (
-            <View key={course._id} style={styles.courseCard}>
-              <Text style={styles.courseCode}>{course.courseCode}</Text>
-              <Text style={styles.courseName}>{course.courseName}</Text>
-              <Text style={styles.meta}>Sem {course.semester} | {course.department || '-'}</Text>
-              <Text style={styles.meta}>Faculty: {course.faculty || '-'}</Text>
-
-              <View style={styles.rowBtns}>
-                <TouchableOpacity
-                  style={[styles.registerButton, isRegistered && styles.registeredButton]}
-                  onPress={() => handleRegister(course._id)}
-                  disabled={isRegistered}
-                >
-                  <Text style={[styles.registerText, isRegistered && styles.registeredText]}>
-                    {isRegistered ? 'Registered' : 'Register'}
-                  </Text>
-                </TouchableOpacity>
-                {!!course.discourseLink && (
-                  <TouchableOpacity
-                    style={[styles.discourseButton, !hasGoogleCollegeLogin && styles.disabled]}
-                    onPress={() => openLink(course.discourseLink)}
-                    disabled={!hasGoogleCollegeLogin}
-                  >
-                    <Text style={styles.discourseText}>Discourse</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-
-              {(course.chapters || []).map((chapter) => (
-                <View key={chapter._id} style={styles.chapterCard}>
-                  <Text style={styles.chapterName}>Chapter {chapter.chapterNo}: {chapter.chapterName}</Text>
-                  {!!chapter.description && <Text style={styles.chapterDesc}>{chapter.description}</Text>}
-
-                  {(chapter.pdfs || []).map((pdf, idx) => (
-                    <View key={`${chapter._id}-pdf-${idx}`} style={styles.pdfRow}>
-                      <Text style={styles.pdfTitle}>{pdf.title}</Text>
-                      <TouchableOpacity style={styles.downloadBtn} onPress={() => openLink(pdf.url)}>
-                        <Ionicons name="download-outline" size={14} color="#FFFFFF" />
-                        <Text style={styles.downloadText}>Download</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-
-                  {(chapter.externalLinks || []).map((lnk, idx) => (
-                    <TouchableOpacity key={`${chapter._id}-ext-${idx}`} style={styles.itemLink} onPress={() => openLink(lnk.url)}>
-                      <Ionicons name="link-outline" size={14} color="#1E6FD9" />
-                      <Text style={styles.itemLinkText}>{lnk.label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              ))}
-            </View>
-          );
-        })}
-
-        {!loading && filteredCourses.length === 0 && (
+        ListEmptyComponent={!loading ? (
           <View style={styles.empty}><Text style={styles.emptyText}>No subjects found.</Text></View>
-        )}
-        <View style={{ height: 10 }} />
-      </ScrollView>
+        ) : null}
+      />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F7FA' },
-  infoBanner: { flexDirection: 'row', alignItems: 'center', padding: 8, backgroundColor: '#EAF4FF' },
-  infoText: { marginLeft: 6, color: '#2D4B66', fontSize: 12, flex: 1 },
+  container: { flex: 1, backgroundColor: ds.colors.background },
+  infoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    backgroundColor: '#DBEAFE',
+    borderBottomWidth: 1,
+    borderBottomColor: '#BFDBFE',
+  },
+  infoText: { marginLeft: 6, color: '#1E3A8A', ...typography.caption, flex: 1 },
   filtersRow: { padding: 8, gap: 8 },
   selector: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    backgroundColor: ds.colors.surface,
+    borderRadius: ds.radius.pill,
     borderWidth: 1,
-    borderColor: '#D7E0EA',
+    borderColor: ds.colors.border,
     paddingHorizontal: 10,
     paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  selectorLabel: { fontSize: 12, color: '#6C8094', fontWeight: '700' },
-  selectorValue: { flex: 1, fontSize: 13, color: '#1F354A' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', justifyContent: 'center', padding: 16 },
-  modalCard: { backgroundColor: '#FFFFFF', borderRadius: 10, maxHeight: '70%' },
+  selectorLabel: { ...typography.caption, color: ds.colors.textSecondary, fontWeight: '700' },
+  selectorValue: { flex: 1, ...typography.bodySm, color: ds.colors.textPrimary },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)', justifyContent: 'center', padding: 16 },
+  modalCard: { backgroundColor: ds.colors.surface, borderRadius: ds.radius.lg, maxHeight: '70%', ...ds.shadows.card },
   optionRow: { paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#EEF2F6' },
-  optionText: { color: '#2E475E' },
+  optionText: { ...typography.body, color: ds.colors.textPrimary },
   list: { flex: 1, paddingHorizontal: 8 },
-  courseCard: { backgroundColor: '#FFFFFF', borderRadius: 10, padding: 10, marginBottom: 8 },
-  courseCode: { color: '#4A90E2', fontWeight: '700', marginBottom: 5 },
-  courseName: { fontSize: 15, fontWeight: '700', color: '#233547', marginBottom: 5 },
-  meta: { color: '#627789', fontSize: 12, marginBottom: 5 },
+  courseCard: {
+    backgroundColor: ds.colors.surface,
+    borderRadius: ds.radius.lg,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: ds.colors.border,
+    ...ds.shadows.soft,
+  },
+  courseCode: { color: ds.colors.primaryBlue, ...typography.label, fontWeight: '700', marginBottom: 5 },
+  courseName: { ...typography.title, fontWeight: '700', color: ds.colors.textPrimary, marginBottom: 5 },
+  meta: { color: ds.colors.textSecondary, ...typography.caption, marginBottom: 5 },
   rowBtns: { flexDirection: 'row', gap: 8, marginBottom: 6 },
-  registerButton: { backgroundColor: '#EAF4FF', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 7 },
-  registeredButton: { backgroundColor: '#E2F7EA' },
-  registerText: { color: '#4A90E2', fontWeight: '700', fontSize: 12 },
-  registeredText: { color: '#27AE60' },
-  discourseButton: { backgroundColor: '#324F6B', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 7 },
-  discourseText: { color: '#FFFFFF', fontWeight: '600', fontSize: 12 },
+  registerButton: { backgroundColor: '#EEF2FF', borderRadius: ds.radius.pill, paddingHorizontal: 12, paddingVertical: 7 },
+  registeredButton: { backgroundColor: ds.status.approved.bg },
+  registerText: { color: ds.colors.primaryIndigo, ...typography.label, fontWeight: '700' },
+  registeredText: { color: ds.status.approved.text },
+  discourseButton: { backgroundColor: ds.colors.primaryBlue, borderRadius: ds.radius.pill, paddingHorizontal: 12, paddingVertical: 7 },
+  discourseText: { color: '#FFFFFF', ...typography.label, fontWeight: '700' },
   disabled: { opacity: 0.4 },
-  chapterCard: { backgroundColor: '#F7FAFD', borderRadius: 8, padding: 8, marginTop: 8 },
-  chapterName: { fontWeight: '700', color: '#22394E', marginBottom: 5, fontSize: 12 },
-  chapterDesc: { color: '#5F7487', marginBottom: 6, fontSize: 12 },
+  chapterCard: { backgroundColor: '#F8FAFC', borderRadius: ds.radius.md, padding: 10, marginTop: 8, borderWidth: 1, borderColor: '#E2E8F0' },
+  chapterName: { ...typography.bodySm, fontWeight: '700', color: ds.colors.textPrimary, marginBottom: 5 },
+  chapterDesc: { color: ds.colors.textSecondary, ...typography.caption, marginBottom: 6 },
   pdfRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, gap: 8 },
-  pdfTitle: { flex: 1, color: '#22425F', fontSize: 12 },
-  downloadBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#1E6FD9', borderRadius: 14, paddingHorizontal: 8, paddingVertical: 5 },
-  downloadText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  pdfTitle: { flex: 1, color: ds.colors.textPrimary, ...typography.caption },
+  downloadBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: ds.colors.primaryBlue, borderRadius: ds.radius.pill, paddingHorizontal: 9, paddingVertical: 5 },
+  downloadText: { color: '#FFFFFF', ...typography.caption, fontWeight: '700' },
   itemLink: { flexDirection: 'row', alignItems: 'center', marginBottom: 5 },
-  itemLinkText: { marginLeft: 5, color: '#1E6FD9', fontWeight: '600', fontSize: 12 },
-  empty: { backgroundColor: '#FFFFFF', borderRadius: 10, padding: 12, alignItems: 'center' },
-  emptyText: { color: '#7A8B9A' },
+  itemLinkText: { marginLeft: 5, color: ds.colors.primaryBlue, ...typography.caption, fontWeight: '700' },
+  empty: { backgroundColor: ds.colors.surface, borderRadius: ds.radius.lg, padding: 12, alignItems: 'center', borderWidth: 1, borderColor: ds.colors.border },
+  emptyText: { color: ds.colors.textSecondary, ...typography.bodySm },
 });
 
 export default AcademicCoursesScreen;

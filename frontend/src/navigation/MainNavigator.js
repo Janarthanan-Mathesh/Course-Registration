@@ -9,13 +9,18 @@ import UniversalCoursesScreen from '../screens/UniversalCoursesScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import AdminCertificatesScreen from '../screens/AdminCertificatesScreen';
 import { useAuth } from '../context/AuthContext';
+import typography from '../utils/typography';
+import ds from '../utils/designSystem';
 
 const Tab = createBottomTabNavigator();
 
 const MainNavigator = () => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const isMentor = user?.role === 'mentor';
+  const isVerifier = isAdmin || isMentor;
   const hasCollegeEmail = String(user?.email || '').toLowerCase().endsWith('@bitsathy.ac.in');
+  const canAccessAcademic = !isAdmin && (hasCollegeEmail || isMentor);
 
   return (
     <Tab.Navigator
@@ -39,22 +44,29 @@ const MainNavigator = () => {
 
           return <Ionicons name={iconName} size={size} color={color} />;
         },
-        tabBarActiveTintColor: '#4A90E2',
-        tabBarInactiveTintColor: '#95A5A6',
+        tabBarActiveTintColor: ds.colors.primaryIndigo,
+        tabBarInactiveTintColor: ds.colors.muted,
         tabBarStyle: {
-          backgroundColor: '#FFFFFF',
+          backgroundColor: ds.colors.surface,
           borderTopWidth: 1,
-          borderTopColor: '#E0E0E0',
+          borderTopColor: ds.colors.border,
           height: 60,
           paddingBottom: 8,
           paddingTop: 8,
         },
         headerStyle: {
-          backgroundColor: '#4A90E2',
+          backgroundColor: ds.colors.primaryIndigo,
         },
         headerTintColor: '#FFFFFF',
         headerTitleStyle: {
-          fontWeight: 'bold',
+          ...typography.title,
+          color: '#FFFFFF',
+          fontWeight: '700',
+        },
+        tabBarLabelStyle: {
+          ...typography.caption,
+          fontWeight: '600',
+          marginBottom: 2,
         },
       })}
     >
@@ -63,7 +75,7 @@ const MainNavigator = () => {
 
       {!isAdmin && (
         <>
-          {hasCollegeEmail && (
+          {canAccessAcademic && (
             <Tab.Screen
               name="Academic"
               component={AcademicCoursesScreen}
@@ -78,11 +90,11 @@ const MainNavigator = () => {
         </>
       )}
 
-      {isAdmin && (
+      {isVerifier && (
         <Tab.Screen
           name="Admin"
           component={AdminCertificatesScreen}
-          options={{ title: 'Certificates Review' }}
+          options={{ title: 'Verification Panel' }}
         />
       )}
 

@@ -3,6 +3,8 @@ const Notification = require('../models/Notification');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const MIN_CERT_DURATION_HOURS = 6;
+const MIN_DURATION_REJECTION_REASON = 'Certificate duration must be greater than 6 hours.';
 
 // Multer config
 const storage = multer.diskStorage({
@@ -37,17 +39,27 @@ const uploadCertificate = async (req, res) => {
     try {
       const {
         courseName,
+        courseProvider,
+        skillsLearned,
+        durationHours,
         courseType,
         enrollmentId,
         fileUrl: providedFileUrl,
         fileName: providedFileName,
       } = req.body;
 
-      if (!courseName || !courseType) {
-        return res.status(400).json({ success: false, message: 'courseName and courseType are required' });
+      if (!courseName || !courseProvider || !skillsLearned || !durationHours || !courseType) {
+        return res.status(400).json({
+          success: false,
+          message: 'courseName, courseProvider, skillsLearned, durationHours and courseType are required',
+        });
       }
       if (!['academic', 'universal'].includes(courseType)) {
         return res.status(400).json({ success: false, message: 'Invalid courseType' });
+      }
+      const parsedDurationHours = Number(durationHours);
+      if (!Number.isFinite(parsedDurationHours) || parsedDurationHours <= 0) {
+        return res.status(400).json({ success: false, message: 'durationHours must be a positive number' });
       }
 
       const resolvedFileUrl = req.file
@@ -63,17 +75,29 @@ const uploadCertificate = async (req, res) => {
         enrollment: enrollmentId,
         courseType,
         courseName,
+        courseProvider,
+        skillsLearned,
+        durationHours: parsedDurationHours,
         fileUrl: resolvedFileUrl,
         fileName: req.file ? req.file.originalname : providedFileName || '',
-        status: 'pending',
+        status: parsedDurationHours >= MIN_CERT_DURATION_HOURS ? 'pending' : 'rejected',
         isApproved: false,
         approvedBy: null,
         approvedAt: null,
         verifiedBy: null,
         verifiedAt: null,
         verificationNotes: '',
-        rejectionReason: '',
+        rejectionReason: parsedDurationHours >= MIN_CERT_DURATION_HOURS ? '' : MIN_DURATION_REJECTION_REASON,
       });
+
+      if (parsedDurationHours < MIN_CERT_DURATION_HOURS) {
+        await Notification.create({
+          user: req.user._id,
+          title: 'Certificate Rejected',
+          message: `Your certificate for "${certificate.courseName}" was rejected. Reason: ${MIN_DURATION_REJECTION_REASON}`,
+          type: 'certificate_rejected',
+        });
+      }
 
       res.status(201).json({ success: true, certificate });
     } catch (error) {
@@ -133,9 +157,6 @@ const approveCertificate = async (req, res) => {
 const rejectCertificate = async (req, res) => {
   try {
     const { rejectionReason = '', verificationNotes = '' } = req.body;
-    if (!rejectionReason.trim()) {
-      return res.status(400).json({ success: false, message: 'rejectionReason is required' });
-    }
 
     const certificate = await Certificate.findById(req.params.id).populate('user', 'email username');
     if (!certificate) return res.status(404).json({ success: false, message: 'Certificate not found' });
@@ -147,13 +168,18 @@ const rejectCertificate = async (req, res) => {
     certificate.approvedBy = null;
     certificate.approvedAt = null;
     certificate.verificationNotes = verificationNotes;
-    certificate.rejectionReason = rejectionReason;
+    const normalizedRejectionReason = rejectionReason.trim()
+      || (Number(certificate.durationHours) < MIN_CERT_DURATION_HOURS ? MIN_DURATION_REJECTION_REASON : '');
+    if (!normalizedRejectionReason) {
+      return res.status(400).json({ success: false, message: 'rejectionReason is required' });
+    }
+    certificate.rejectionReason = normalizedRejectionReason;
     await certificate.save();
 
     await Notification.create({
       user: certificate.user._id,
       title: 'Certificate Rejected',
-      message: `Your certificate for "${certificate.courseName}" was rejected. Reason: ${rejectionReason}`,
+      message: `Your certificate for "${certificate.courseName}" was rejected. Reason: ${normalizedRejectionReason}`,
       type: 'certificate_rejected',
     });
 

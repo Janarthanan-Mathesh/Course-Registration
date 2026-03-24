@@ -1,13 +1,28 @@
-import React, { createContext, useState, useContext } from 'react';
+import React, { createContext, useEffect, useState, useContext } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiPost, apiGet, apiPut } from '../services/api';
 
 const AuthContext = createContext();
+const AUTH_STORAGE_KEY = 'course_registration_auth';
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [isSessionReady, setIsSessionReady] = useState(false);
+
+  const persistSession = async (sessionToken, sessionUser) => {
+    if (!sessionToken || !sessionUser) return;
+    await AsyncStorage.setItem(
+      AUTH_STORAGE_KEY,
+      JSON.stringify({ token: sessionToken, user: sessionUser })
+    );
+  };
+
+  const clearSession = async () => {
+    await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+  };
 
   const loadProfile = async (sessionToken) => {
     const data = await apiGet('/users/me', sessionToken);
@@ -17,7 +32,7 @@ export const AuthProvider = ({ children }) => {
   const login = async (
     email,
     password,
-    selectedRole = 'user',
+    selectedRole = 'student',
     firebaseIdToken = '',
     adminDevOtp = ''
   ) => {
@@ -34,6 +49,7 @@ export const AuthProvider = ({ children }) => {
       });
       setToken(data.token);
       setIsLoggedIn(true);
+      await persistSession(data.token, { id: fullProfile._id, ...fullProfile });
       return data;
     } finally {
       setIsAuthLoading(false);
@@ -49,7 +65,8 @@ export const AuthProvider = ({ children }) => {
       phone: formData.phone,
       linkedinLink: formData.linkedin,
       githubLink: formData.github,
-      role: formData.role || 'user',
+      role: formData.role || 'student',
+      adminDevOtp: formData.adminDevOtp || '',
     };
     return apiPost('/auth/register', payload);
   };
@@ -63,6 +80,7 @@ export const AuthProvider = ({ children }) => {
     setToken(sessionToken);
     setUser(sessionUser);
     setIsLoggedIn(Boolean(sessionToken && sessionUser));
+    persistSession(sessionToken, sessionUser).catch(() => {});
   };
 
   const refreshProfile = async () => {
@@ -78,15 +96,59 @@ export const AuthProvider = ({ children }) => {
   const updateProfile = async (payload) => {
     if (!token) throw new Error('Not logged in');
     const data = await apiPut('/users/me', payload, token);
-    setUser((prev) => ({ ...prev, ...data.user }));
-    return data.user;
+    const updatedUser = { ...user, ...data.user };
+    setUser(updatedUser);
+    await persistSession(token, updatedUser);
+    return updatedUser;
   };
 
-  const logout = () => {
+  const logout = async () => {
     setUser(null);
     setToken(null);
     setIsLoggedIn(false);
+    try {
+      await clearSession();
+    } catch (_) {
+      // ignore storage cleanup failures
+    }
   };
+
+  useEffect(() => {
+    let mounted = true;
+
+    const restoreSession = async () => {
+      try {
+        const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+        if (!raw) return;
+
+        const parsed = JSON.parse(raw);
+        if (!parsed?.token) return;
+
+        const fullProfile = await loadProfile(parsed.token);
+        if (!mounted) return;
+
+        const restoredUser = { id: fullProfile._id, ...fullProfile };
+        setToken(parsed.token);
+        setUser(restoredUser);
+        setIsLoggedIn(true);
+        await persistSession(parsed.token, restoredUser);
+      } catch (_) {
+        if (mounted) {
+          setToken(null);
+          setUser(null);
+          setIsLoggedIn(false);
+        }
+        await clearSession();
+      } finally {
+        if (mounted) setIsSessionReady(true);
+      }
+    };
+
+    restoreSession();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   return (
     <AuthContext.Provider
@@ -95,6 +157,7 @@ export const AuthProvider = ({ children }) => {
         token,
         isLoggedIn,
         isAuthLoading,
+        isSessionReady,
         login,
         register,
         verifyEmailOtp,

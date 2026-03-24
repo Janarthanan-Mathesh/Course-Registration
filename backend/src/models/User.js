@@ -33,8 +33,8 @@ const userSchema = new mongoose.Schema({
   githubLink: { type: String, default: '' },
   role: {
     type: String,
-    enum: ['user', 'admin'],
-    default: 'user',
+    enum: ['student', 'mentor', 'admin'],
+    default: 'student',
   },
   authProvider: {
     type: String,
