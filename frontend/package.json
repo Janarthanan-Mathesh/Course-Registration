@@ -16,7 +16,9 @@
     "ios:local": "expo start --ios --host localhost -c",
     "ios:lan": "expo start --ios --host lan -c",
     "ios:tunnel": "expo start --ios --host tunnel -c",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "build:web": "expo export --platform web",
+    "vercel-build": "expo export --platform web"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
