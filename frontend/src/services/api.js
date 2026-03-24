@@ -7,6 +7,7 @@ const REQUEST_TIMEOUT_MS = 20000;
 const HEALTH_TIMEOUT_MS = 8000;
 const MAX_CANDIDATE_BASES = 60;
 const HEALTH_BATCH_SIZE = 8;
+const MAX_REQUEST_RETRIES = 2;
 const FORCE_MANUAL_API_BASE = String(process.env.EXPO_PUBLIC_API_FORCE_BASE || '').toLowerCase() === 'true';
 const MANUAL_API_BASE = process.env.EXPO_PUBLIC_API_BASE_URL;
 
@@ -164,12 +165,17 @@ const withTimeout = async (promise, timeoutMs = REQUEST_TIMEOUT_MS) => {
   }
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 let cachedApiBase = '';
 
 const isNetworkError = (error) =>
   error?.message === 'Network request failed' ||
   error?.message === 'Request timeout' ||
   /network request failed/i.test(error?.message || '');
+
+const isRetryableServerError = (error) =>
+  [502, 503, 504].includes(error?.status);
 
 const findHealthyBase = async (candidates) => {
   for (let i = 0; i < candidates.length; i += HEALTH_BATCH_SIZE) {
@@ -248,16 +254,39 @@ const requestWithApiBase = async (method, path, body, token, requestOptions = {}
     return parseResponse(response);
   };
 
+  const executeWithRetries = async (base) => {
+    let lastError;
+
+    for (let attempt = 0; attempt <= MAX_REQUEST_RETRIES; attempt += 1) {
+      try {
+        return await execute(base);
+      } catch (error) {
+        lastError = error;
+        if (!isNetworkError(error) && !isRetryableServerError(error)) {
+          throw error;
+        }
+
+        if (attempt === MAX_REQUEST_RETRIES) {
+          throw error;
+        }
+
+        await sleep(1500 * (attempt + 1));
+      }
+    }
+
+    throw lastError;
+  };
+
   // 1) Try current base (cached or quickly resolved).
   const candidates = buildCandidateBaseUrls();
   const primaryBase = cachedApiBase || (await resolveApiBase()) || candidates[0] || '';
   if (primaryBase) {
     try {
-      const data = await execute(primaryBase);
+      const data = await executeWithRetries(primaryBase);
       cachedApiBase = primaryBase;
       return data;
     } catch (error) {
-      if (!isNetworkError(error)) {
+      if (!isNetworkError(error) && !isRetryableServerError(error)) {
         cachedApiBase = primaryBase;
         throw error;
       }
@@ -268,11 +297,11 @@ const requestWithApiBase = async (method, path, body, token, requestOptions = {}
   const recoveredBase = await resolveApiBase(true);
   if (recoveredBase) {
     try {
-      const data = await execute(recoveredBase);
+      const data = await executeWithRetries(recoveredBase);
       cachedApiBase = recoveredBase;
       return data;
     } catch (error) {
-      if (!isNetworkError(error)) {
+      if (!isNetworkError(error) && !isRetryableServerError(error)) {
         cachedApiBase = recoveredBase;
         throw error;
       }
