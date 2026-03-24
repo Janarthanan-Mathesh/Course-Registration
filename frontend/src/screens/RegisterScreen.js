@@ -72,7 +72,12 @@ const RegisterScreen = ({ navigation }) => {
       const data = await register(formData);
       if (data?.requiresLogin) {
         setStatusType('error');
-        setStatusText(data.message || 'Account already exists. Please login.');
+        const message = data.message || 'Account already exists. Please login.';
+        setStatusText(message);
+        Alert.alert('Account Exists', message, [
+          { text: 'Stay Here', style: 'cancel' },
+          { text: 'Go to Login', onPress: () => navigation.navigate('Login') },
+        ]);
         return;
       }
       setRegisteredUserId(data.userId);

@@ -3,8 +3,8 @@ import Constants from 'expo-constants';
 
 const API_PORT = 5000;
 const API_PORT_SCAN_SPAN = 0;
-const REQUEST_TIMEOUT_MS = 5000;
-const HEALTH_TIMEOUT_MS = 900;
+const REQUEST_TIMEOUT_MS = 20000;
+const HEALTH_TIMEOUT_MS = 8000;
 const MAX_CANDIDATE_BASES = 60;
 const HEALTH_BATCH_SIZE = 8;
 const FORCE_MANUAL_API_BASE = String(process.env.EXPO_PUBLIC_API_FORCE_BASE || '').toLowerCase() === 'true';
@@ -25,6 +25,19 @@ const extractBaseUrls = (value) => {
 };
 
 const EXTRA_API_BASES = extractBaseUrls(process.env.EXPO_PUBLIC_API_BASE_URLS);
+
+const normalizeApiBase = (baseUrl) => {
+  if (!baseUrl) return '';
+
+  try {
+    const parsed = new URL(baseUrl);
+    const pathname = parsed.pathname.replace(/\/$/, '');
+    const normalizedPath = pathname.endsWith('/api') ? pathname : `${pathname || ''}/api`;
+    return `${parsed.protocol}//${parsed.host}${normalizedPath}`;
+  } catch (_) {
+    return String(baseUrl).trim().replace(/\/$/, '');
+  }
+};
 
 const extractHost = (value) => {
   if (!value) return '';
@@ -80,16 +93,29 @@ const expandBaseByPorts = (baseUrl) => {
     const parsed = new URL(baseUrl);
     const protocol = parsed.protocol;
     const host = parsed.hostname;
-    const path = parsed.pathname.endsWith('/api') ? '/api' : parsed.pathname.replace(/\/$/, '');
-    const startPort = parsed.port ? Number(parsed.port) : API_PORT;
+    const path = parsed.pathname.endsWith('/api') ? parsed.pathname : `${parsed.pathname.replace(/\/$/, '') || ''}/api`;
+
+    if (!parsed.port) {
+      return [`${protocol}//${parsed.host}${path}`];
+    }
+
+    const startPort = Number(parsed.port) || API_PORT;
     return buildPortVariants(startPort).map((p) => `${protocol}//${host}:${p}${path}`);
   } catch (_) {
-    return [baseUrl];
+    return [normalizeApiBase(baseUrl)];
   }
 };
 
 const buildCandidateBaseUrls = () => {
   const candidates = [];
+
+  if (MANUAL_API_BASE) {
+    candidates.push(...expandBaseByPorts(normalizeApiBase(MANUAL_API_BASE)));
+    if (FORCE_MANUAL_API_BASE) {
+      return [...new Set(candidates)].slice(0, MAX_CANDIDATE_BASES);
+    }
+  }
+
   const runtimeHosts = getHostsFromRuntime();
   const usableRuntimeHosts = runtimeHosts.filter((host) => isValidRuntimeHost(host));
 
@@ -98,12 +124,8 @@ const buildCandidateBaseUrls = () => {
   });
 
   // Keep manual base always as fallback; this allows explicit LAN overrides.
-  if (MANUAL_API_BASE) {
-    candidates.push(...expandBaseByPorts(MANUAL_API_BASE.replace(/\/$/, '')));
-  }
-
   EXTRA_API_BASES.forEach((base) => {
-    candidates.push(...expandBaseByPorts(base.replace(/\/$/, '')));
+    candidates.push(...expandBaseByPorts(normalizeApiBase(base)));
   });
 
   if (Platform.OS === 'android') {
@@ -173,6 +195,11 @@ const findHealthyBase = async (candidates) => {
 const resolveApiBase = async (forceRefresh = false) => {
   if (cachedApiBase && !forceRefresh) return cachedApiBase;
   const candidates = buildCandidateBaseUrls();
+
+  if (FORCE_MANUAL_API_BASE && candidates.length) {
+    cachedApiBase = candidates[0];
+    return cachedApiBase;
+  }
 
   const healthyBase = await findHealthyBase(candidates);
   cachedApiBase = healthyBase || '';
@@ -255,7 +282,7 @@ const requestWithApiBase = async (method, path, body, token, requestOptions = {}
   cachedApiBase = '';
   const attempted = candidates.slice(0, 4).join(', ');
   throw new Error(
-    `Network request failed. Tried: ${attempted}. Check backend is running on port 5000, phone+PC same network, and firewall allows node/5000.`
+    `Network request failed. Tried: ${attempted}. If you are using Render, wait for the service to wake up and try again.`
   );
 };
 
